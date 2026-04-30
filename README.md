@@ -156,7 +156,9 @@ Most of my automation work focuses on reducing manual overhead for small teams a
 
 - 🔗 [GitHub](https://github.com/zainulabideen041)
 - 💼 [LinkedIn](https://linkedin.com/in/zainulabideen041)
-- 📧 [EMAIL_ADDRESS]
+- 🌐 [Portfolio](https://zainulabideen-portfolio.netlify.app)
+- 📱[Instagram](https://instagram.com/zainulabideen.rizvi)
+- [X](https://twitter.com/m_zainrizvi)
 
 ---
 
