@@ -1,0 +1,384 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "labelIds": [
+            "INBOX"
+          ],
+          "q": "is:unread"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -912,
+        32
+      ],
+      "id": "20935fe3-3266-4ac6-ba96-06a2ed8ecc05",
+      "name": "Gmail Trigger1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "1bF20tZF6cQdxnIz",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst emails = [];\n\nfor (const item of items) {\n  // Extract From\n  let rawFrom = '';\n  if (item.json.from && item.json.from.value) {\n    const sender = item.json.from.value[0];\n    rawFrom = sender.name ? `${sender.name} <${sender.address}>` : sender.address;\n  }\n\n  // Extract To\n  let rawTo = '';\n  if (item.json.to && item.json.to.value) {\n    rawTo = item.json.to.value.map(v => v.address).join(', ');\n  }\n\n  const rawSubject = item.json.subject || '(No Subject)';\n\n  // Parse sender name and email\n  let senderName = '';\n  let senderEmail = '';\n  if (rawFrom.includes('<') && rawFrom.includes('>')) {\n    const match = rawFrom.match(/<(.+?)>/);\n    senderEmail = match ? match[1] : rawFrom;\n    senderName = rawFrom.split('<')[0].trim();\n  } else if (rawFrom.includes('@')) {\n    senderEmail = rawFrom.trim();\n    senderName = rawFrom.split('@')[0];\n  } else {\n    senderEmail = 'unknown@email.com';\n    senderName = 'Unknown Sender';\n  }\n\n  const bodyText = item.json.text || '';\n  const snippet = bodyText.substring(0, 200);\n\n  // FIX: include 'from' field in fullContent for sender-based keyword matching\n  const email = {\n    messageId: item.json.id || '',\n    threadId: item.json.threadId || item.json.id || '',\n    from: rawFrom,\n    senderEmail,\n    senderName,\n    to: rawTo,\n    subject: rawSubject,\n    bodyText,\n    snippet,\n    date: item.json.date || new Date().toISOString(),\n    labels: item.json.labels || [],\n    fullContent: `${rawSubject} ${bodyText} ${rawFrom}`.toLowerCase()\n  };\n\n  emails.push({ json: email });\n}\n\nreturn emails;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        32
+      ],
+      "id": "ed4a4d9c-03d7-4242-9926-3a95e73f5086",
+      "name": "Extract Email Information1"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────\n// CLASSIFY EMAIL PRIORITY\n// Bugs fixed vs original:\n//   1. fullContent now includes 'from' field (set in Extract node)\n//   2. Added matchedKeyword field for easier debugging\n//   3. Massively expanded keyword lists\n// ─────────────────────────────────────────────────────────────────\n\nconst items = $input.all();\nconst output = [];\n\n// ── HIGH PRIORITY ────────────────────────────────────────────────\nconst HIGH_PRIORITY_KEYWORDS = [\n  // Job application lifecycle\n  'interview', 'interview invitation', 'interview scheduled',\n  'interview confirmation', 'phone screen', 'technical interview',\n  'onsite interview', 'panel interview', 'final round',\n  'job offer', 'offer letter', 'offer accepted', 'offer extended',\n  'application received', 'application status', 'application update',\n  'shortlisted', 'selected for', 'not selected', 'rejected',\n  'background check', 'reference check', 'drug test',\n  'joining date', 'start date', 'onboarding',\n  'employment contract', 'signing bonus', 'relocation package',\n  'salary negotiation', 'compensation package', 'benefits package',\n  'position', 'vacancy', 'opening', 'job description',\n  'recruiter', 'hiring manager', 'talent acquisition',\n  'hr ', 'human resources', 'people ops',\n  'resume review', 'cv review', 'profile review',\n  'screening call', 'assessment test', 'coding challenge',\n  'technical test', 'take-home assignment', 'case study',\n\n  // Work urgency\n  'urgent', 'asap', 'immediate', 'action required',\n  'response needed', 'response required', 'reply needed',\n  'follow up', 'follow-up', 'reminder', 'overdue',\n  'deadline', 'due today', 'due tomorrow', 'past due',\n  'approval needed', 'approval required', 'sign off', 'sign-off',\n  'waiting on you', 'blocking', 'blocked',\n\n  // Work/Professional\n  'meeting', 'call scheduled', 'calendar invite',\n  'board meeting', 'team meeting', 'standup', 'sprint review',\n  'quarterly review', 'performance review', 'annual review',\n  'one on one', '1:1', 'sync',\n  'manager', 'supervisor', 'director', 'vp ', 'ceo', 'cto', 'cfo',\n  'client', 'customer', 'stakeholder', 'partner',\n  'project', 'task', 'deliverable', 'milestone', 'sprint',\n  'escalation', 'critical issue', 'production issue', 'incident',\n  'system down', 'outage', 'p0', 'p1', 'priority 1', 'sev1',\n  'bug report', 'hotfix', 'patch',\n  'kpi', 'okr', 'target missed', 'kpi missed',\n  'budget approval', 'budget review', 'purchase order',\n\n  // Financial/Legal\n  'salary', 'payslip', 'pay stub', 'payroll',\n  'invoice', 'payment due', 'late payment', 'final notice',\n  'overdue invoice', 'past due invoice',\n  'contract', 'agreement', 'mou', 'memorandum of understanding',\n  'nda', 'non-disclosure', 'non disclosure',\n  'legal notice', 'compliance', 'audit', 'tax filing',\n  'termination', 'resignation', 'layoff', 'redundancy',\n  'notice period', 'last working day',\n];\n\n// ── MEDIUM PRIORITY ──────────────────────────────────────────────\nconst MEDIUM_PRIORITY_KEYWORDS = [\n  // Platforms\n  'udemy', 'coursera', 'edx', 'pluralsight', 'linkedin learning',\n  'skillshare', 'codecademy', 'freecodecamp', 'alison',\n  'mit opencourseware', 'khan academy', 'brilliant.org',\n  'upwork', 'toptal', 'freelancer.com', 'fiverr',\n  'github', 'gitlab', 'bitbucket', 'stackoverflow',\n  'hackernews', 'dev.to', 'medium.com', 'hashnode',\n  'producthunt', 'indiehackers',\n\n  // Learning content\n  'course', 'tutorial', 'learn', 'training',\n  'certification', 'certificate', 'credential',\n  'webinar', 'workshop', 'seminar', 'bootcamp',\n  'hackathon', 'challenge', 'competition',\n  'conference', 'tech talk', 'panel discussion', 'keynote',\n  'meetup', 'community event',\n  'research paper', 'white paper', 'case study', 'ebook',\n  'newsletter', 'blog post', 'tech article', 'digest',\n  'podcast episode', 'video tutorial',\n\n  // Career development\n  'career development', 'career advice', 'career opportunity',\n  'skill', 'upskill', 'reskill', 'mentorship', 'coaching',\n  'linkedin profile', 'portfolio review',\n  'open source', 'pull request', 'contribution', 'pr review',\n  'peer review', 'code review',\n\n  // Tech topics\n  'ai ', 'artificial intelligence', 'machine learning',\n  'deep learning', 'llm', 'gpt', 'chatgpt', 'claude',\n  'data science', 'data engineering', 'analytics',\n  'python', 'javascript', 'typescript', 'react', 'next.js',\n  'node.js', 'rust', 'go ', 'java ', 'kotlin', 'swift',\n  'devops', 'devsecops', 'sre',\n  'aws', 'azure', 'google cloud', 'gcp',\n  'kubernetes', 'docker', 'terraform', 'ansible',\n  'api', 'rest', 'graphql', 'grpc',\n  'microservices', 'architecture', 'system design',\n  'database', 'postgresql', 'mongodb', 'redis',\n  'cybersecurity', 'penetration testing', 'ethical hacking',\n  'blockchain', 'web3', 'solidity',\n  'product update', 'feature release', 'changelog', 'release notes',\n\n  // Subscriptions/tools\n  'subscription renewal', 'account update', 'plan upgrade',\n  'free trial', 'beta access', 'early access',\n  'product launch', 'new feature',\n  'slack', 'notion', 'trello', 'jira', 'linear',\n  'figma', 'canva', 'loom', 'zoom', 'google meet',\n];\n\n// ── LOW PRIORITY ─────────────────────────────────────────────────\nconst LOW_PRIORITY_KEYWORDS = [\n  // Shopping/Promotions\n  'sale', 'flash sale', 'mega sale', 'clearance', 'blowout',\n  'discount', 'coupon', 'promo code', 'voucher',\n  'cashback', 'reward points', 'loyalty points',\n  'offer', 'deal', 'bundle deal', 'combo offer',\n  'best price', 'lowest price', 'price drop',\n  'exclusive deal', 'special offer', 'limited time',\n  'buy now', 'shop now', 'order now', 'grab it',\n  'free shipping', 'express delivery', 'track your order',\n  'amazon', 'daraz', 'aliexpress', 'ebay', 'noon',\n  'order confirmed', 'order shipped', 'delivery update',\n  'product recommendation', 'you might like',\n  'customers also bought', 'trending now',\n  'birthday offer', 'anniversary deal', 'seasonal sale',\n  'holiday sale', 'eid sale', 'black friday', 'cyber monday',\n\n  // Noise/Misc\n  'monthly digest', 'weekly roundup', 'daily deals',\n  'social media', 'follow us', 'like our page', 'share this',\n  'survey', 'feedback form', 'rate your experience',\n  'no-reply', 'donotreply', 'do-not-reply', 'noreply',\n  'unsubscribe', 'manage preferences', 'email preferences',\n  'you\\'re receiving this', 'opt out',\n];\n\nfor (const item of items) {\n  const email = item.json;\n  const content = email.fullContent || '';\n\n  let category = '2';\n  let priorityScore = 3;\n  let reason = 'General or unclassified email';\n  let matchedKeyword = '';\n  let needsReply = false;\n\n  // HIGH PRIORITY\n  for (const keyword of HIGH_PRIORITY_KEYWORDS) {\n    if (content.includes(keyword)) {\n      category = '0';\n      priorityScore = 9;\n      matchedKeyword = keyword;\n      reason = `High priority keyword: \"${keyword}\"`;\n      needsReply = true;\n      break;\n    }\n  }\n\n  // MEDIUM PRIORITY\n  if (category === '2') {\n    for (const keyword of MEDIUM_PRIORITY_KEYWORDS) {\n      if (content.includes(keyword)) {\n        category = '1';\n        priorityScore = 6;\n        matchedKeyword = keyword;\n        reason = `Medium priority keyword: \"${keyword}\"`;\n        break;\n      }\n    }\n  }\n\n  // LOW PRIORITY\n  if (category === '2') {\n    for (const keyword of LOW_PRIORITY_KEYWORDS) {\n      if (content.includes(keyword)) {\n        priorityScore = 1;\n        matchedKeyword = keyword;\n        reason = `Low priority keyword: \"${keyword}\"`;\n        break;\n      }\n    }\n  }\n\n  // LABEL STRATEGY\n  let labelIdsToApply = [];\n  let priorityLabel = '';\n\n  if (category === '0') {\n    priorityLabel = 'High Priority - Job / Work';\n    labelIdsToApply = ['IMPORTANT', 'STARRED'];\n  } else if (category === '1') {\n    priorityLabel = 'Medium Priority - Learning';\n    labelIdsToApply = ['IMPORTANT'];\n  } else {\n    priorityLabel = 'Low Priority - Promotions / Other';\n    labelIdsToApply = [];\n  }\n\n  email.category = category;\n  email.priorityScore = priorityScore;\n  email.priorityLabel = priorityLabel;\n  email.reason = reason;\n  email.matchedKeyword = matchedKeyword;\n  email.needsReply = needsReply;\n  email.labelIdsToApply = labelIdsToApply;\n\n  output.push({ json: email });\n}\n\nreturn output;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -512,
+        224
+      ],
+      "id": "c4f59ec9-4fb9-465f-bc9e-41181de2c839",
+      "name": "Classify Email Priority"
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "numberOutputs": 3,
+        "output": "={{ $json.category }}"
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -288,
+        16
+      ],
+      "id": "e4a8adbf-0811-4731-886d-a3e6154cfcf1",
+      "name": "Route by Priority"
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.messageId }}",
+        "labelIds": "={{ $json.labelIdsToApply }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -64,
+        -128
+      ],
+      "id": "1dedc1ac-f2c7-4b82-8fa2-48b905b05c40",
+      "name": "Label High Priority",
+      "webhookId": "3b6875a7-32df-4ec6-9c33-a90b77fa455b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "1bF20tZF6cQdxnIz",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.messageId }}",
+        "labelIds": "={{ $json.labelIdsToApply }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -64,
+        32
+      ],
+      "id": "f087eb02-9d77-4b1f-a348-69d7ab463abf",
+      "name": "Label Medium Priority",
+      "webhookId": "3b6875a7-32df-4ec6-9c33-a90b77fa455b",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "1bF20tZF6cQdxnIz",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-2.0-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a professional email assistant.\n\nYou will draft a clear, polite, and professional reply to the email below.\n\n--- ORIGINAL EMAIL ---\nFrom: {{ $json.senderName }} <{{ $json.senderEmail }}>\nSubject: {{ $json.subject }}\n\n{{ $json.bodyText }}\n--- END OF EMAIL ---\n\nInstructions:\n1. Start the body with: Dear {{ $json.senderName }},\n2. Reply professionally and relevantly to the actual email content.\n3. If the email mentions a specific date, time, or action — acknowledge it.\n4. If no specific action is required, write a polite acknowledgment and next step.\n5. Close with: Best regards,\\nMuqadas Ejaz\n6. Tone: professional, concise, polite.\n7. Do NOT include explanations, placeholders, markdown, or extra commentary.\n\nReturn ONLY this JSON and nothing else — no backticks, no preamble:\n{\n  \"subject\": \"Re: {{ $json.subject }}\",\n  \"body\": \"<full email body here>\",\n  \"senderEmail\": \"{{ $json.senderEmail }}\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        144,
+        -128
+      ],
+      "id": "46626f48-1173-481a-8a22-749b592ba4d9",
+      "name": "Message a model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "trrLZpEXKw8UKggi",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "models/gemini-2.0-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a professional email assistant.\n\nYou will draft a concise, polite reply to the learning/career email below.\n\n--- ORIGINAL EMAIL ---\nFrom: {{ $json.senderName }} <{{ $json.senderEmail }}>\nSubject: {{ $json.subject }}\n\n{{ $json.bodyText }}\n--- END OF EMAIL ---\n\nInstructions:\n1. Start with: Dear {{ $json.senderName }},\n2. Politely acknowledge the course, opportunity, or resource mentioned.\n3. Express interest or request more details as appropriate.\n4. Close with: Best regards,\\nMuqadas Ejaz\n5. Tone: professional, concise, polite.\n6. Do NOT include explanations, placeholders, markdown, or extra commentary.\n\nReturn ONLY this JSON and nothing else — no backticks, no preamble:\n{\n  \"subject\": \"Re: {{ $json.subject }}\",\n  \"body\": \"<full email body here>\",\n  \"senderEmail\": \"{{ $json.senderEmail }}\"\n}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        144,
+        32
+      ],
+      "id": "fa673378-bba5-4f08-b0ea-581f1bbe2e90",
+      "name": "Message a model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "trrLZpEXKw8UKggi",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────\n// PARSE HIGH PRIORITY RESPONSE\n// Reads Gemini output, strips any accidental markdown fences,\n// parses JSON, and passes clean fields downstream.\n// NOTE: Code in JavaScript3 + Merge2 nodes have been REMOVED.\n//       senderEmail is already embedded in the AI prompt and\n//       returned in the JSON response, so no merge is needed.\n// ─────────────────────────────────────────────────────────────────\n\nconst items = $input.all();\nconst replies = [];\n\nfor (const item of items) {\n  // Gemini node output structure: output[0].content[0].text\n  const rawText = (\n    item.json.output?.[0]?.content?.[0]?.text ||\n    item.json.text ||\n    item.json.output ||\n    ''\n  ).toString().trim();\n\n  // Strip markdown fences if model returns them despite instructions\n  const cleanText = rawText\n    .replace(/^```json\\s*/i, '')\n    .replace(/^```\\s*/i, '')\n    .replace(/```\\s*$/i, '')\n    .trim();\n\n  let parsed = {};\n  try {\n    parsed = JSON.parse(cleanText);\n  } catch (e) {\n    // Fallback: best-effort plain text body\n    parsed = {\n      subject: `Re: ${item.json.subject || ''}`.trim(),\n      body: cleanText || 'Thank you for your email. I will follow up shortly.',\n      senderEmail: item.json.senderEmail || ''\n    };\n  }\n\n  replies.push({\n    json: {\n      subject:     parsed.subject     || '(No Subject)',\n      body:        parsed.body        || '',\n      senderEmail: parsed.senderEmail || item.json.senderEmail || ''\n    }\n  });\n}\n\nreturn replies;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        -128
+      ],
+      "id": "4b6956c7-480a-4f06-9c70-c9b78eaefa68",
+      "name": "Parse High Priority Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ─────────────────────────────────────────────────────────────────\n// PARSE MEDIUM PRIORITY RESPONSE\n// Same logic as high priority parser.\n// ─────────────────────────────────────────────────────────────────\n\nconst items = $input.all();\nconst replies = [];\n\nfor (const item of items) {\n  const rawText = (\n    item.json.output?.[0]?.content?.[0]?.text ||\n    item.json.text ||\n    item.json.output ||\n    ''\n  ).toString().trim();\n\n  const cleanText = rawText\n    .replace(/^```json\\s*/i, '')\n    .replace(/^```\\s*/i, '')\n    .replace(/```\\s*$/i, '')\n    .trim();\n\n  let parsed = {};\n  try {\n    parsed = JSON.parse(cleanText);\n  } catch (e) {\n    parsed = {\n      subject: `Re: ${item.json.subject || ''}`.trim(),\n      body: cleanText || 'Thank you for the information. I will review and get back to you.',\n      senderEmail: item.json.senderEmail || ''\n    };\n  }\n\n  replies.push({\n    json: {\n      subject:     parsed.subject     || '(No Subject)',\n      bodyText:    parsed.body        || '',\n      senderEmail: parsed.senderEmail || item.json.senderEmail || ''\n    }\n  });\n}\n\nreturn replies;\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        480,
+        32
+      ],
+      "id": "e4a9bcb2-a362-43d6-8962-a41c02c8e1ae",
+      "name": "Parse Medium Priority Response"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.senderEmail }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        -128
+      ],
+      "id": "99e865a7-cd92-4e9e-a6fd-e2b6a7de90d3",
+      "name": "Send Auto-Reply",
+      "webhookId": "4e370ac5-275d-4a41-84d9-ce035ed17e53",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "1bF20tZF6cQdxnIz",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.bodyText }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        720,
+        32
+      ],
+      "id": "6aaf068d-5dbd-4d02-a3b8-967eefd96fb7",
+      "name": "Create Draft",
+      "webhookId": "0f0d711f-31aa-4fc9-9bba-0444ddc860e1",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "1bF20tZF6cQdxnIz",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger1": {
+      "main": [
+        [
+          {
+            "node": "Extract Email Information1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Email Information1": {
+      "main": [
+        [
+          {
+            "node": "Classify Email Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Email Priority": {
+      "main": [
+        [
+          {
+            "node": "Route by Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Priority": {
+      "main": [
+        [
+          {
+            "node": "Label High Priority",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Medium Priority",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Label High Priority": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Medium Priority": {
+      "main": [
+        [
+          {
+            "node": "Message a model1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Parse High Priority Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model1": {
+      "main": [
+        [
+          {
+            "node": "Parse Medium Priority Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse High Priority Response": {
+      "main": [
+        [
+          {
+            "node": "Send Auto-Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Medium Priority Response": {
+      "main": [
+        [
+          {
+            "node": "Create Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8129c603c79acf189cb9d24e861c1c79cd493d14187d353d415a692442c48d2a"
+  }
+}
