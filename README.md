@@ -13,7 +13,7 @@ Gmail Trigger (every minute, unread only)
                     └── Route by Priority (Switch)
                             ├── [0] High Priority  → Label (IMPORTANT + STARRED) → Gemini AI → Parse → Send Auto-Reply
                             ├── [1] Medium Priority → Label (IMPORTANT)           → Gemini AI → Parse → Create Draft
-                            └── [2] Low Priority   → Label (custom) or no-op
+                            └── [2] Low Priority   → Stop
 ```
 
 ---
@@ -49,7 +49,7 @@ Keywords include: `udemy`, `coursera`, `certification`, `webinar`, `hackathon`, 
 
 ### ⚪ Low Priority — Promotions / Other
 
-No reply, no draft. Optionally labeled with a custom Gmail label.
+The low-priority branch ends without a label, a draft, or a reply.
 
 Keywords include: `sale`, `discount`, `coupon`, `unsubscribe`, `flash sale`, `order shipped`, `no-reply`, `donotreply`, `follow us`, and 40+ more.
 
@@ -70,8 +70,8 @@ Keywords include: `sale`, `discount`, `coupon`, `unsubscribe`, `flash sale`, `or
 
 | Node                             | Type      | Role                                            |
 | -------------------------------- | --------- | ----------------------------------------------- |
-| `Gmail Trigger`                  | Trigger   | Polls inbox every minute for unread emails      |
-| `Extract Email Information`      | Code (JS) | Parses raw Gmail data into clean fields         |
+| `Gmail Trigger1`                  | Trigger   | Polls inbox every minute for unread emails      |
+| `Extract Email Information1`      | Code (JS) | Parses raw Gmail data into clean fields         |
 | `Classify Email Priority`        | Code (JS) | Keyword engine — assigns category, score, label |
 | `Route by Priority`              | Switch    | Routes flow to 3 branches based on category     |
 | `Label High Priority`            | Gmail     | Applies IMPORTANT + STARRED                     |
@@ -93,35 +93,30 @@ Keywords include: `sale`, `discount`, `coupon`, `unsubscribe`, `flash sale`, `or
 - Google account with Gmail API access
 - Google Gemini API key
 
-### Step 1 — Import the Workflow
+### Step 1 — Import the workflow
 
-1. Copy the contents of `workflow.json`
-2. In n8n, go to **Workflows → Import from JSON**
-3. Paste and import
+1. Download [Email Assistant Agent.json](./Email%20Assistant%20Agent.json) from this repository.
+2. Create a workflow in n8n. Open the workflow menu, select **Import from File**, and choose the downloaded JSON.
+3. Save the workflow and leave it unpublished while you configure the credentials.
 
-### Step 2 — Configure Gmail OAuth2
+### Step 2 — Connect Gmail and Gemini
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com)
-2. Create a project → Enable **Gmail API**
-3. Create OAuth2 credentials (Desktop or Web App)
-4. In n8n, create a new **Gmail OAuth2** credential and connect your account
-5. Replace the credential reference in all Gmail nodes with your credential
+- Select your Gmail OAuth2 credential in `Gmail Trigger1`, `Label High Priority`, `Label Medium Priority`, `Send Auto-Reply`, and `Create Draft`. Use a test mailbox for your first run. [n8n Gmail credentials](https://docs.n8n.io/integrations/builtin/credentials/google/)
+- Select your Gemini credential and an available model in `Message a model` and `Message a model1`. Both branches send email content to Gemini, so use synthetic messages for testing.
 
-### Step 3 — Configure Gemini API
+### Step 3 — Test with three messages
 
-1. Get a Gemini API key from [Google AI Studio](https://aistudio.google.com)
-2. In n8n, create a **Google Gemini (PaLM) API** credential
-3. Replace the credential reference in both Gemini nodes with your credential
+1. Disconnect `Send Auto-Reply` from `Parse High Priority Response` on the canvas to prevent outbound mail during the test.
+2. In the trigger, narrow the **Sender** filter to a test sender you control. Send these messages to the test inbox and leave them unread.
+3. Run a manual execution. Confirm each result in the execution data.
 
-### Step 4 — (Optional) Create a Low Priority Gmail Label
+| Example subject | Expected result |
+| --- | --- |
+| `Interview tomorrow` | Applies IMPORTANT and STARRED. The high-priority parser produces a reply for inspection. |
+| `Free webinar on TypeScript` | Applies IMPORTANT and creates a draft. |
+| `Weekend sale` | Routes to low priority and stops without sending mail or creating a draft. |
 
-1. In Gmail → Settings → Labels → **Create new label**
-2. Name it `Low Priority` (or anything you prefer)
-3. In the `Label Low Priority` node, select that label from the dropdown
-
-### Step 5 — Activate
-
-Toggle the workflow to **Active**. It will start polling immediately.
+Keep the send node disconnected for draft-only testing. Reconnect it only after you choose to enable automatic replies and verify the intended recipients. Publish the workflow when you are ready for recurring Gmail polling.
 
 ---
 
