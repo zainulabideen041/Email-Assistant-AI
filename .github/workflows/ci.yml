@@ -63,7 +63,9 @@ jobs:
           if errors:
               raise SystemExit("\n".join(errors))
           PY
-          git diff --check "$BASE_SHA...$HEAD_SHA"
+          # Preserve checks for trailing spaces while accepting CRLF line endings.
+          git -c core.whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol \
+            diff --check "$BASE_SHA...$HEAD_SHA"
       - name: Lint workflow syntax
         run: |
           cd "$RUNNER_TEMP"
